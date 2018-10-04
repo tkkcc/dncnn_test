@@ -11,8 +11,10 @@ from skimage.transform import resize
 import matplotlib.pyplot as plt
 import matplotlib
 from mpl_toolkits.axes_grid1 import make_axes_locatable
+import matplotlib.gridspec as gridspec
 
-import csv
+debug = 3
+
 
 def parse_args():
     parser = argparse.ArgumentParser()
@@ -85,25 +87,31 @@ def n(x, x_):
 
 
 def s(fig, ax, x, title):
-    im = ax.imshow(x, cmap='gray')
-    ax.set_title(title)
-    divider = make_axes_locatable(ax)
-    cax = divider.append_axes('right', size='5%', pad=0.05)
-    fig.colorbar(im, cax=cax, orientation='vertical')
+    if debug < 3:
+        return
+    cax = ax.imshow(x, cmap='gray', aspect='equal')
+    min = np.amin(x)
+    max = np.amax(x)
+    ax.set_title(f'{title} {min:.2f}~{max:.2f}', loc='left')
+    ax.set_xticks([])
+    ax.set_yticks([])
+    # divider = make_axes_locatable(ax)
+    # cax = divider.append_axes('right', size='5%', pad=0)
+    # fig.colorbar(im, cax=cax, orientation='vertical')
 
 
 if __name__ == '__main__':
     args = parse_args()
     cuda = torch.cuda.is_available()
-    matplotlib.rc('font', size=18)
-    matplotlib.rcParams['text.usetex'] = True
-    matplotlib.rcParams['text.latex.unicode'] = True
+    # matplotlib.rc('font', size=8)
+    # matplotlib.rcParams['text.usetex'] = True
+    # matplotlib.rcParams['text.latex.unicode'] = True
     model = torch.load(Path(args.model_dir, 'model.pth'),
                        map_location='cuda:0')
     model.eval()
     model = model.cuda() if cuda else model
     img = imread('BSD/test007.png')
-    img = resize(img, (100, 100))
+    # img = resize(img, (100, 100))
     x_ = np.array(img, dtype=np.float32) / 255.0
     tmp = torch.from_numpy(x_).view(1, -1, *x_.shape)
     tmp = tmp.cuda() if cuda else tmp
@@ -114,47 +122,58 @@ if __name__ == '__main__':
     y = y.cuda() if cuda else y
     x = torch.tensor(y, requires_grad=True)
     x = x.cuda() if cuda else x
-    lr = 0.01
-    mse = nn.MSELoss(reduction='sum')
-    l1 = nn.L1Loss(reduction='sum')
-    iter_num = 2
+    # mse = nn.MSELoss(reduction='sum')
+    # l1 = nn.L1Loss(reduction='sum')
+    w = 5
+    lr = 0.05
+    iter_num = 5
+    plt.figure(figsize=(3*w, 3*(iter_num+w)))
     # x_k, x_k-y, dD_k/dx_k, dL(x_k)/dx_k, x_k+1
-    fig, ax = plt.subplots(5, 30, figsize=(5, 30))
+    gs = gridspec.GridSpec(iter_num+w, w, wspace=0, hspace=0)
     psnrs = []
-    psnrms = []
-    t = {}
-    
     for i in range(iter_num):
-        
         model.zero_grad()
         model_out = model(x)
         model_loss = model_out.sum()
+        # model_loss = model_out.clamp(0).sum()
         model_loss.backward()
         # model_out.backward(torch.ones_like(model_out))
         # for name, parameter in model.named_parameters():
         #     t[name] = parameter.grad
         with torch.no_grad():
-            s(fig,ax[i+1,0],n(x,x_),f'$x_{i}$')
-            s(fig,ax[i+1,1],n(x-y,x_),f'$x_{i}-y$')
+            s(None, plt.subplot(gs[w+i, 0]), n(x, x_), f'$x_{i}$')
+            s(None, plt.subplot(gs[w+i, 1]), n(x-y, x_), f'$x_{i}-y$')
             g = (25/args.sigma)**2*(x-y)+x.grad
-            s(fig,ax[i+1,2],n(x.grad,x_),f'$\partial D(x_{i})/\partial x_{i}$')
-            s(fig,ax[i+1,2],n(g,x_),f'$\partial L(x_{i})/\partial x_{i}$')
+            s(None, plt.subplot(gs[w+i, 2]), n(x.grad, x_),
+              f'$\partial\Sigma D(x_{i})/\partial x_{i}$')
+            s(None, plt.subplot(gs[w+i, 3]), n(lr*g, x_),
+              f'$\eta\partial L(x_{i})/\partial x_{i}$')
             x -= lr * g
             x.grad.zero_()
-            t = n(x,x_)
+            t = n(x, x_)
             psnr = compare_psnr(x_, t)
             ssim = compare_ssim(x_, t)
-            s(fig,ax[i+1,2],n(x,x_),f'$x_{i+1}$ psnr={psnr:2.2f}db ssim={ssim:1.4f}')
+            s(None, plt.subplot(gs[w+i, 4]), n(x, x_),
+              f'$x_{i+1}$ psnr{psnr:2.2f} ssim{ssim:1.4f}')
             print(f'{i} lr={lr:.3f} psnr={psnr:2.2f}db')
             psnrs.append(psnr)
-    # top summary plot
-    ax0 = plt.subplot2grid((30, 5), (0, 0), colspan=5,rowspan=5)
-    ax0.plot([i+1 for i in range(iter_num)], psnrs, label='$x_i$')
-    ax0.plot([i+1 for i in range(iter_num)], [compare_psnr(x_,n(y-model(y),x_))]*iter_num, label='DnCNN')
-    # ax0.xlabel('iteration')
-    # ax0.ylabel('psnr')
-    # ax0.legend()
-    plt.show()
+    if debug >= 3:
+        # top summary plot
+        matplotlib.rcParams.update({'font.size': 20})
+        ax = plt.subplot(gs[:4, :])
+        ax.plot([i+1 for i in range(iter_num)], psnrs, label='$x_i$')
+        ax.plot([i+1 for i in range(iter_num)],
+                [compare_psnr(x_, n(y-model(y), x_))]*iter_num, label='DnCNN')
+        ax.set_xlabel('iteration')
+        ax.set_ylabel('psnr')
+        ax.set_xticks([i + 1 for i in range(iter_num)])
+        # ax.set_yticks(np.arange(20, 40, 0.2))
+        ax.set_title(f'learning rate = {lr}, iteration num = {iter_num}')
+        ax.legend()
+        plt.tight_layout()
+        plt.show()
+        # plt.axis('off')
+        # plt.savefig('foo.png', bbox_inches='tight')
 
 # if __name__ == '__main__':
 #     args = parse_args()
