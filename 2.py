@@ -12,9 +12,7 @@ import matplotlib.pyplot as plt
 import matplotlib
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 import matplotlib.gridspec as gridspec
-
-debug = 3
-
+from matplotlib.ticker import MaxNLocator
 
 def parse_args():
     parser = argparse.ArgumentParser()
@@ -87,8 +85,6 @@ def n(x, x_):
 
 
 def s(fig, ax, x, title):
-    if debug < 3:
-        return
     cax = ax.imshow(x, cmap='gray', aspect='equal')
     min = np.amin(x)
     max = np.amax(x)
@@ -125,55 +121,57 @@ if __name__ == '__main__':
     # mse = nn.MSELoss(reduction='sum')
     # l1 = nn.L1Loss(reduction='sum')
     w = 5
-    lr = 0.05
-    iter_num = 5
+    lr = 1/10
+    iter_num = 20
+
     plt.figure(figsize=(3*w, 3*(iter_num+w)))
     # x_k, x_k-y, dD_k/dx_k, dL(x_k)/dx_k, x_k+1
     gs = gridspec.GridSpec(iter_num+w, w, wspace=0, hspace=0)
     psnrs = []
     for i in range(iter_num):
+        # if i%20==19:
+        #     lr /= 3
+        
         model.zero_grad()
         model_out = model(x)
-        model_loss = model_out.sum()
+        model_loss = model_out.pow(2).sum()
         # model_loss = model_out.clamp(0).sum()
         model_loss.backward()
         # model_out.backward(torch.ones_like(model_out))
         # for name, parameter in model.named_parameters():
         #     t[name] = parameter.grad
         with torch.no_grad():
-            s(None, plt.subplot(gs[w+i, 0]), n(x, x_), f'$x_{i}$')
-            s(None, plt.subplot(gs[w+i, 1]), n(x-y, x_), f'$x_{i}-y$')
+            # s(None, plt.subplot(gs[w+i, 0]), n(x, x_), f'$x_{i}$')
+            # s(None, plt.subplot(gs[w+i, 1]), n(x-y, x_), f'$x_{i}-y$')
             g = (25/args.sigma)**2*(x-y)+x.grad
-            s(None, plt.subplot(gs[w+i, 2]), n(x.grad, x_),
-              f'$\partial\Sigma D(x_{i})/\partial x_{i}$')
-            s(None, plt.subplot(gs[w+i, 3]), n(lr*g, x_),
-              f'$\eta\partial L(x_{i})/\partial x_{i}$')
+            # s(None, plt.subplot(gs[w+i, 2]), n(x.grad, x_),
+            #   f'$\partial\Sigma D(x_{i})/\partial x_{i}$')
+            # s(None, plt.subplot(gs[w+i, 3]), n(lr*g, x_),
+            #   f'$\eta\partial L(x_{i})/\partial x_{i}$')
             x -= lr * g
             x.grad.zero_()
             t = n(x, x_)
             psnr = compare_psnr(x_, t)
             ssim = compare_ssim(x_, t)
-            s(None, plt.subplot(gs[w+i, 4]), n(x, x_),
-              f'$x_{i+1}$ psnr{psnr:2.2f} ssim{ssim:1.4f}')
+            # s(None, plt.subplot(gs[w+i, 4]), n(x, x_),
+            #   f'$x_{i+1}$ psnr{psnr:2.2f} ssim{ssim:1.4f}')
             print(f'{i} lr={lr:.3f} psnr={psnr:2.2f}db')
             psnrs.append(psnr)
-    if debug >= 3:
-        # top summary plot
-        matplotlib.rcParams.update({'font.size': 20})
-        ax = plt.subplot(gs[:4, :])
-        ax.plot([i+1 for i in range(iter_num)], psnrs, label='$x_i$')
-        ax.plot([i+1 for i in range(iter_num)],
-                [compare_psnr(x_, n(y-model(y), x_))]*iter_num, label='DnCNN')
-        ax.set_xlabel('iteration')
-        ax.set_ylabel('psnr')
-        ax.set_xticks([i + 1 for i in range(iter_num)])
-        # ax.set_yticks(np.arange(20, 40, 0.2))
-        ax.set_title(f'learning rate = {lr}, iteration num = {iter_num}')
-        ax.legend()
-        plt.tight_layout()
-        plt.show()
-        # plt.axis('off')
-        # plt.savefig('foo.png', bbox_inches='tight')
+    # top summary plot
+    # matplotlib.rcParams.update({'font.size': 20})
+    ax = plt.subplot(gs[:6, :])
+    ax.plot([i+1 for i in range(iter_num)], psnrs, label='$x_i$')
+    ax.plot([i+1 for i in range(iter_num)],
+            [compare_psnr(x_, n(y-model(y), x_))]*iter_num, label='DnCNN')
+    ax.set_xlabel('iteration')
+    ax.set_ylabel('psnr')
+    ax.xaxis.set_major_locator(MaxNLocator(integer=True))
+    # ax.set_xticks([i + 1 for i in range(iter_num)])
+    # ax.set_yticks(np.arange(20, 40, 0.2))
+    ax.set_title(f'learning rate = {lr:.3f}, iteration num = {iter_num}')
+    ax.legend()
+    # plt.tight_layout()
+    plt.show()
 
 # if __name__ == '__main__':
 #     args = parse_args()
