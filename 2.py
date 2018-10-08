@@ -14,6 +14,7 @@ from mpl_toolkits.axes_grid1 import make_axes_locatable
 import matplotlib.gridspec as gridspec
 from matplotlib.ticker import MaxNLocator
 
+
 def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument('--set_dir', default='.', type=str,
@@ -85,9 +86,10 @@ def n(x, x_):
 
 
 def s(fig, ax, x, title):
-    cax = ax.imshow(x, cmap='gray', aspect='equal')
     min = np.amin(x)
     max = np.amax(x)
+    # x=x.clip(0,1)
+    cax = ax.imshow(x, cmap='gray',aspect='equal')
     ax.set_title(f'{title} {min:.2f}~{max:.2f}', loc='left')
     ax.set_xticks([])
     ax.set_yticks([])
@@ -122,8 +124,8 @@ if __name__ == '__main__':
     # l1 = nn.L1Loss(reduction='sum')
     w = 5
     lr = 1/10
-    iter_num = 20
-
+    iter_num = 15
+    lam = 0.1
     plt.figure(figsize=(3*w, 3*(iter_num+w)))
     # x_k, x_k-y, dD_k/dx_k, dL(x_k)/dx_k, x_k+1
     gs = gridspec.GridSpec(iter_num+w, w, wspace=0, hspace=0)
@@ -131,19 +133,36 @@ if __name__ == '__main__':
     for i in range(iter_num):
         # if i%20==19:
         #     lr /= 3
-        
         model.zero_grad()
         model_out = model(x)
         model_loss = model_out.pow(2).sum()
         # model_loss = model_out.clamp(0).sum()
         model_loss.backward()
+        # s(None, plt.subplot(2, 3, 1), n(x, x_), f'$x_{i}$')
+        # lam = 0.1
+        # s(None, plt.subplot(2, 3, 2), n((lam * x.grad), x_),
+        #   f'${lam}*\partial\Sigma D(x_{i})_{{ij}}^2/\partial x_{i}$')
+        # lam = 0.5
+        # s(None, plt.subplot(2, 3, 3), n((lam * x.grad), x_),
+        #   f'${lam}*\partial\Sigma D(x_{i})_{{ij}}^2/\partial x_{i}$')
+        # lam = 1
+        # s(None, plt.subplot(2, 3, 4), n((lam * x.grad), x_),
+        #   f'${lam}*\partial\Sigma D(x_{i})_{{ij}}^2/\partial x_{i}$')
+        # lam = 5
+        # s(None, plt.subplot(2, 3, 5), n((lam * x.grad), x_),
+        #   f'${lam}*\partial\Sigma D(x_{i})_{{ij}}^2/\partial x_{i}$')
+        # lam = 10
+        # s(None, plt.subplot(2, 3, 6), n((lam * x.grad), x_),
+        #   f'${lam}*\partial\Sigma D(x_{i})_{{ij}}^2/\partial x_{i}$')
+        # plt.show()
+        # exit(0)
         # model_out.backward(torch.ones_like(model_out))
         # for name, parameter in model.named_parameters():
         #     t[name] = parameter.grad
         with torch.no_grad():
             # s(None, plt.subplot(gs[w+i, 0]), n(x, x_), f'$x_{i}$')
             # s(None, plt.subplot(gs[w+i, 1]), n(x-y, x_), f'$x_{i}-y$')
-            g = (25/args.sigma)**2*(x-y)+x.grad
+            g = (25/args.sigma)**2*(x-y)+lam*x.grad
             # s(None, plt.subplot(gs[w+i, 2]), n(x.grad, x_),
             #   f'$\partial\Sigma D(x_{i})/\partial x_{i}$')
             # s(None, plt.subplot(gs[w+i, 3]), n(lr*g, x_),
@@ -152,14 +171,14 @@ if __name__ == '__main__':
             x.grad.zero_()
             t = n(x, x_)
             psnr = compare_psnr(x_, t)
-            ssim = compare_ssim(x_, t)
+            # ssim = compare_ssim(x_, t)
             # s(None, plt.subplot(gs[w+i, 4]), n(x, x_),
             #   f'$x_{i+1}$ psnr{psnr:2.2f} ssim{ssim:1.4f}')
             print(f'{i} lr={lr:.3f} psnr={psnr:2.2f}db')
             psnrs.append(psnr)
     # top summary plot
     # matplotlib.rcParams.update({'font.size': 20})
-    ax = plt.subplot(gs[:6, :])
+    ax = plt.subplot(gs[:4, :])
     ax.plot([i+1 for i in range(iter_num)], psnrs, label='$x_i$')
     ax.plot([i+1 for i in range(iter_num)],
             [compare_psnr(x_, n(y-model(y), x_))]*iter_num, label='DnCNN')
@@ -168,7 +187,7 @@ if __name__ == '__main__':
     ax.xaxis.set_major_locator(MaxNLocator(integer=True))
     # ax.set_xticks([i + 1 for i in range(iter_num)])
     # ax.set_yticks(np.arange(20, 40, 0.2))
-    ax.set_title(f'learning rate = {lr:.3f}, iteration num = {iter_num}')
+    ax.set_title(f'$\eta={lr:.3f},\lambda={lam}$, iteration num={iter_num}')
     ax.legend()
     # plt.tight_layout()
     plt.show()
