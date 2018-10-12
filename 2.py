@@ -10,10 +10,11 @@ from skimage.io import imread, imsave
 from skimage.transform import resize
 import matplotlib.pyplot as plt
 import matplotlib
-from mpl_toolkits.axes_grid1 import make_axes_locatable
+# from mpl_toolkits.axes_grid1 import make_axes_locatable
 import matplotlib.gridspec as gridspec
 from matplotlib.ticker import MaxNLocator
-import csv
+# import csv
+import torch.nn.functional as F
 
 
 def parse_args():
@@ -82,7 +83,8 @@ class DnCNN(nn.Module):
                 init.constant_(m.bias, 0)
 
 
-def n(x, x_):
+def n(x, x_=None):
+    return x.detach().squeeze().cpu().numpy().astype(np.float32)
     return x.view(*x_.shape).detach().cpu().numpy().astype(np.float32)
 
 
@@ -91,171 +93,81 @@ def s(fig, ax, x, title):
     max = np.amax(x)
     # x=x.clip(0,1)
     cax = ax.imshow(x, cmap='gray', aspect='equal')
-    ax.set_title(f'{title} {min:.2f}~{max:.2f}', loc='left')
+    # ax.set_title(f'{title} {min:.2f}~{max:.2f}', loc='left')
+    ax.set_title(f'{title}', loc='left')
     ax.set_xticks([])
     ax.set_yticks([])
-    # divider = make_axes_locatable(ax)
-    # cax = divider.append_axes('right', size='5%', pad=0)
-    # fig.colorbar(im, cax=cax, orientation='vertical')
 
+def pad(img, kernel,mode='replicate'):
+    p = [(i-1)//2 for i in kernel.shape]
+    return F.pad(img, (p[-1], p[-1], p[-2], p[-2]), mode)
 
 def m():
+    torch.set_num_threads(2)
     args = parse_args()
     cuda = torch.cuda.is_available()
-    # matplotlib.rc('font', size=8)
-    # matplotlib.rcParams['text.usetex'] = True
-    # matplotlib.rcParams['text.latex.unicode'] = True
     model = torch.load(Path(args.model_dir, 'model.pth'),
-                       map_location='cuda:0')
+                       map_location='cpu')
+                       # map_location='cuda:0')
+    model = model.cuda() if cuda else model
     model.eval()
-    # model = model.cuda() if cuda else model
-    lr = 0.01
-    iter_num = 100
+    lr = 10
+    iter_num = 500
     lam = 1
-    directory = 'Set12'
-    # files = ['01', '03', '05', '06', '08', '09']
-    # files = ['01', '03', '05', '06']
-    files = ['01']
-    c = csv.writer(open('result.csv', 'a'))
-    c.writerow(['filename', 'start psnr', 'highest psnr', 'iteration num'])
-    psnr_all = []
-    parameters = {
-        eta: [0.01]* 10,
-        lam: [1,2,3,4,5,6,7,8,9,10]
-    }
-    for f in Path(directory).iterdir():
-        if not f.stem in files:
-            continue
-        img = imread(f)
-        # img = resize(img, (100, 100))
-        x_ = np.array(img, dtype=np.float32) / 255.0
-        # tmp = torch.from_numpy(x_).view(1, -1, *x_.shape)
-        # tmp = tmp.cuda() if cuda else tmp
-        np.random.seed(seed=0)  # for reproducibility
-        noise = np.random.normal(0, args.sigma/255.0, x_.shape)
-        y_ = (x_ + noise).astype(np.float32)
-        y = torch.from_numpy(y_).view(1, -1, *y_.shape)
-        y = y.cuda() if cuda else y
-        x = torch.tensor(y, requires_grad=True)
-        x = x.cuda() if cuda else x
-        # mse = nn.MSELoss(reduction='sum')
-        # l1 = nn.L1Loss(reduction='sum')
-        # w = 5
-        # plt.figure(figsize=(3*w, 3*(iter_num+w)))
-        # x_k, x_k-y, dD_k/dx_k, dL(x_k)/dx_k, x_k+1
-        # gs = gridspec.GridSpec(iter_num+w, w, wspace=0, hspace=0)
-        psnrs = []
-        for i in range(iter_num):
-            # if i%20==19:
-            #     lr /= 3
-            model.zero_grad()
-            model_out = model(x)
-            model_loss = model_out.pow(2).sum()
-            # model_loss = model_out.clamp(0).sum()
-            model_loss.backward()
-            # s(None, plt.subplot(2, 3, 1), n(x, x_), f'$x_{i}$')
-            # lam = 0.1
-            # s(None, plt.subplot(2, 3, 2), n((lam * x.grad), x_),
-            #   f'${lam}*\partial\Sigma D(x_{i})_{{ij}}^2/\partial x_{i}$')
-            # lam = 0.5
-            # s(None, plt.subplot(2, 3, 3), n((lam * x.grad), x_),
-            #   f'${lam}*\partial\Sigma D(x_{i})_{{ij}}^2/\partial x_{i}$')
-            # lam = 1
-            # s(None, plt.subplot(2, 3, 4), n((lam * x.grad), x_),
-            #   f'${lam}*\partial\Sigma D(x_{i})_{{ij}}^2/\partial x_{i}$')
-            # lam = 5
-            # s(None, plt.subplot(2, 3, 5), n((lam * x.grad), x_),
-            #   f'${lam}*\partial\Sigma D(x_{i})_{{ij}}^2/\partial x_{i}$')
-            # lam = 10
-            # s(None, plt.subplot(2, 3, 6), n((lam * x.grad), x_),
-            #   f'${lam}*\partial\Sigma D(x_{i})_{{ij}}^2/\partial x_{i}$')
-            # plt.show()
-            # exit(0)
-            # model_out.backward(torch.ones_like(model_out))
-            # for name, parameter in model.named_parameters():
-            #     t[name] = parameter.grad
-            with torch.no_grad():
-                # s(None, plt.subplot(gs[w+i, 0]), n(x, x_), f'$x_{i}$')
-                # s(None, plt.subplot(gs[w+i, 1]), n(x-y, x_), f'$x_{i}-y$')
-                g = (25/args.sigma)**2*(x-y)+lam*x.grad
-                # s(None, plt.subplot(gs[w+i, 2]), n(x.grad, x_),
-                #   f'$\partial\Sigma D(x_{i})/\partial x_{i}$')
-                # s(None, plt.subplot(gs[w+i, 3]), n(lr*g, x_),
-                #   f'$\eta\partial L(x_{i})/\partial x_{i}$')
-                x -= lr * g
-                x.grad.zero_()
-                t = n(x, x_)
-                psnr = compare_psnr(x_, t)
-                # ssim = compare_ssim(x_, t)
-                # s(None, plt.subplot(gs[w+i, 4]), n(x, x_),
-                #   f'$x_{i+1}$ psnr{psnr:2.2f} ssim{ssim:1.4f}')
-                print(f'{f} {i} lr={lr:.3f} psnr={psnr:2.2f}db')
-                psnrs.append(psnr)
-                if len(psnrs) > 5 and psnrs[-1] == psnrs[-5]:
-                    # del psnrs[-1]
-                    break
-                if len(psnrs) > 5 and psnrs[-2] > psnrs[-1]:
-                    del psnrs[-1]
-                    break
-        psnr_all.append(psnrs[-1])
-        # c.writerow(['filename','start psnr', 'highest psnr','iteration num'])
-        c.writerow([f, f'{compare_psnr(x_, y_):.2f}',
-                    f'{psnrs[-1]:.2f}', len(psnrs)])
-    # avg = np.mean(psnr_all)
-    # print(psnr_all, avg)
-    # c.writerow([f'eta={lr}', f'lambda={lam}', f'psnr avg={avg:.2f}'])
-    return
-    # top summary plot
-    # matplotlib.rcParams.update({'font.size': 20})
-    # ax = plt.subplot(gs[:6, :])
-    ax = plt.subplot()
-    ax.plot([i+1 for i in range(iter_num)], psnrs, label='$x_i$')
-    # ax.plot([i+1 for i in range(iter_num)],
-    #         [compare_psnr(x_, n(y-model(y), x_))]*iter_num, label='DnCNN')
-    dncnn = compare_psnr(x_, n(y-model(y), x_))
+    img = imread('Set12/01.png')
+    k_ = np.loadtxt('./example1.dlm').astype(np.float32)
+    x_ = np.array(img, dtype=np.float32) / 255.0
+    k = torch.from_numpy(k_).view(1, 1, *k_.shape)
+    k = k.cuda() if cuda else k
+    gt = torch.from_numpy(x_).view(1, -1, *x_.shape)
+    gt = gt.cuda() if cuda else gt
+    torch.manual_seed(0)
+    y = pad(gt,k)
+    y = F.conv2d(y, k)
+    y += torch.randn_like(y) * args.sigma / 255
+    x = torch.tensor(y, requires_grad=True)
+    psnrs = []
+
+    plt.figure(figsize=(10,30))
+    gs = gridspec.GridSpec(3, 2, wspace=0, hspace=0)
+    pre = None
+    t=4
+    for i in range(iter_num):
+        t*=0.9
+        lr = 6 + t
+        model.zero_grad()
+        model_out = model(x)
+        model_loss = lam * model_out.norm(2)+0.5*(F.conv2d(pad(x,k), k)-y).norm(2)
+        model_loss.backward()
+        with torch.no_grad():
+            x -= lr * x.grad
+            x.grad.zero_()
+            psnr = compare_psnr(x_,n(x))
+            print(f'{i} lr={lr:.3f} psnr={psnr:2.2f}')
+            psnrs.append(psnr)
+            if len(psnrs) > 5 and psnrs[-2] > psnrs[-1]:
+                x=pre
+                del psnrs[-1]
+                break
+            pre = x.clone()
+    dncnn_out = n(y - model(y))
+    dncnn_psnr = compare_psnr(x_, dncnn_out)
+    start_psnr = compare_psnr(x_, n(y))
+    s(None, plt.subplot(gs[0,0]), x_, f'x = ground truth')
+    s(None, plt.subplot(gs[0,1]), n(y), f'y = x+blue+noise, psnr={start_psnr:.2f}')
+    s(None, plt.subplot(gs[1,0]), dncnn_out, f'dncnn(y), psnr={dncnn_psnr:.2f}')
+    s(None, plt.subplot(gs[1,1]), n(x), f'iteration result, psnr={psnrs[-1]:.2f}')
+    ax = plt.subplot(gs[2:,:])
+    ax.plot([i+1 for i in range(len(psnrs))], psnrs, label='$x_i$')
     ax.set_xlabel('iteration')
     ax.set_ylabel('psnr')
     ax.xaxis.set_major_locator(MaxNLocator(integer=True))
     # ax.set_xticks([i + 1 for i in range(iter_num)])
     # ax.set_yticks(np.arange(20, 40, 0.2))
     ax.set_title(
-        f'$\eta={lr:.2f},\lambda={lam}$, iteration num={iter_num}, dncnn psnr={dncnn:.2f}')
-    ax.legend()
+        f'$\eta={lr:.2f},\lambda={lam}$, iteration num={len(psnrs)}, dncnn psnr={dncnn_psnr:.2f}')
+    # ax.legend()
     # plt.tight_layout()
     plt.show()
 
-
 m()
-# if __name__ == '__main__':
-#     args = parse_args()
-#     model = torch.load(Path(args.model_dir, 'model.pth'), map_location='cpu')
-#     model.eval()
-#     cuda = torch.cuda.is_available()
-#     model = model.cuda() if cuda else model
-#     Path(args.result_dir).mkdir(parents=True, exist_ok=True)
-#     for set_current in args.set_names:
-#         Path(args.result_dir,set_current).mkdir(parents=True, exist_ok=True)
-#         psnrs = []
-#         ssims = []
-#         for img in Path(args.set_dir, set_current).iterdir():
-#             x = np.array(imread(img), dtype=np.float32)/255.0
-#             np.random.seed(seed=0) # for reproducibility
-#             y = x + np.random.normal(0, args.sigma/255.0, x.shape)
-#             y = y.astype(np.float32)
-#             y_ = torch.from_numpy(y).view(1, -1, *y.shape)
-#             y_=y_.cuda() if cuda else y_
-#             x_ = model(y_).view(*y.shape).cpu().detach().numpy().astype(np.float32)
-#             # show(x_)
-#             psnr = compare_psnr(x, x_)
-#             ssim = compare_ssim(x, x_)
-#             if args.save_result:
-#                 name, ext = img.name, img.suffix
-#                 show(np.hstack((y, x_)))
-#             psnrs.append(psnr)
-#             ssims.append(ssim)
-#             print('%10s %10s PSNR=%2.2fdB' % (set_current, img, psnr))
-#         psnr_avg = np.mean(psnrs)
-#         ssim_avg = np.mean(ssims)
-#         psnrs.append(psnr_avg)
-#         ssims.append(ssim_avg)
-#         print('Datset: {0:10s} \n  PSNR = {1:2.2f}dB, SSIM = {2:1.4f}'.format(set_current, psnr_avg, ssim_avg))

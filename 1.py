@@ -10,6 +10,10 @@ from skimage.io import imread, imsave
 from skimage.transform import resize
 import matplotlib.pyplot as plt
 import matplotlib
+from mpl_toolkits.axes_grid1 import make_axes_locatable
+import matplotlib.gridspec as gridspec
+from matplotlib.ticker import MaxNLocator
+import csv
 
 
 def parse_args():
@@ -54,7 +58,7 @@ class DnCNN(nn.Module):
                                     kernel_size=kernel_size, padding=padding, bias=False))
             layers.append(nn.BatchNorm2d(
                 n_channels, eps=0.0001, momentum=0.95))
-            layers.append(nn.ReLU(inplace=True))
+            layers.append(nn.ReLU(inplacse=True))
         layers.append(nn.Conv2d(in_channels=n_channels, out_channels=image_channels,
                                 kernel_size=kernel_size, padding=padding, bias=False))
         self.dncnn = nn.Sequential(*layers)
@@ -63,6 +67,7 @@ class DnCNN(nn.Module):
     def forward(self, x):
         y = x
         out = self.dncnn(x)
+        return out
         return y-out
 
     def _initialize_weights(self):
@@ -77,79 +82,151 @@ class DnCNN(nn.Module):
                 init.constant_(m.bias, 0)
 
 
-if __name__ == '__main__':
+def n(x, x_):
+    return x.view(*x_.shape).detach().cpu().numpy().astype(np.float32)
+
+
+def s(fig, ax, x, title):
+    min = np.amin(x)
+    max = np.amax(x)
+    # x=x.clip(0,1)
+    cax = ax.imshow(x, cmap='gray', aspect='equal')
+    ax.set_title(f'{title} {min:.2f}~{max:.2f}', loc='left')
+    ax.set_xticks([])
+    ax.set_yticks([])
+    # divider = make_axes_locatable(ax)
+    # cax = divider.append_axes('right', size='5%', pad=0)
+    # fig.colorbar(im, cax=cax, orientation='vertical')
+
+
+def m():
     args = parse_args()
-    model = torch.load(Path(args.model_dir, 'model.pth'), map_location='cpu')
-    model.eval()
     cuda = torch.cuda.is_available()
-    model = model.cuda() if cuda else model
-    img = imread('BSD/test006.png')
-    # img = resize(img, (100, 100))
-    x_ = np.array(img, dtype=np.float32) / 255.0
-    tmp = torch.from_numpy(x_).view(1, -1, *x_.shape)
-    tmp = tmp.cuda() if cuda else tmp
-    np.random.seed(seed=0)  # for reproducibility
-    y_ = x_ + np.random.normal(0, args.sigma/255.0, x_.shape)
-    y_ = y_.astype(np.float32)
-    y = torch.from_numpy(y_).view(1, -1, *y_.shape)
-    y = y.cuda() if cuda else y
-    # dncnn result
-    t = model(y).view(*x_.shape).cpu().detach().numpy().astype(np.float32)
-    psnr = compare_psnr(x_, t)
-    show(np.hstack((x_, t)))
-    print('dncnn psnr=%2.2fdb' % psnr)
-    # iterate result
-    x = torch.tensor(y, requires_grad=True)
-    x = x.cuda() if cuda else x
+    # matplotlib.rc('font', size=8)
+    # matplotlib.rcParams['text.usetex'] = True
+    # matplotlib.rcParams['text.latex.unicode'] = True
+    # model = torch.load(Path(args.model_dir, 'model.pth'),
+    #                    map_location='cuda:0')
+    # model.eval()
+    # model = model.cuda() if cuda else model
+    kernel = np.loadtxt('./example1.dlm').astype(np.float32)
     lr = 0.01
-    mse = nn.MSELoss(reduction='sum')
-    l1 = nn.L1Loss(reduction='sum')
-    iter_num = 30
-    psnrs=[]
-    psnrms=[]
-    for i in range(iter_num):
-        if i == 20:
-            show(x.view(*x_.shape).cpu().detach().numpy().astype(np.float32))
-            lr /= 10
-        # elif i == 60:
-        #     lr /=102
-        # show(x.view(*x_.shape).cpu().detach().numpy().astype(np.float32))
-        model.zero_grad()
-        m = model(x)
-        # loss = (x - y).pow(2).sum() / (2 * args.sigma / 25) + torch.abs(x -  model(x)).sum()
-        # loss = mse(x, y) / (2 * args.sigma / 25) + torch.sum(x - model(x))
-        # loss = mse(x, y) / (2 * args.sigma / 25) + l1(x, m)
-        loss = mse(x, y)/2 + l1(x, m)
-        # print(mse(tmp,model(x)),mse(tmp,x))
-        # loss = mse(x, y)/2 + l1(x, tmp)
-        loss.backward()
-        with torch.no_grad():
-            x -= lr * x.grad
-            x.grad.zero_()
-            t = x.view(*x_.shape).cpu().detach().numpy().astype(np.float32)
-            psnr = compare_psnr(x_, t)
-            # show(t)
-            t = m.view(*x_.shape).cpu().detach().numpy().astype(np.float32)
-            psnrm = compare_psnr(x_, t)
-            # show(np.hstack((x_, t)))
-            print('%d lr=%.3f psnr=%2.2fdb psnrm=%2.2fdb loss=%2.2f' %
-                  (i, lr, psnr, psnrm, loss))
-            psnrs.append(psnr)
-            psnrms.append(psnrm)
-    matplotlib.rc('font', size=20)
-    plt.plot([i+1 for i in range(iter_num)], psnrs, label='x')
-    plt.plot([i+1 for i in range(iter_num)], psnrms, label='D(x)')
-    plt.xlabel('iteration')
-    plt.ylabel('psnr')
-    plt.legend()
+    iter_num = 100
+    lam = 1
+    directory = 'Set12'
+    # files = ['01', '03', '05', '06', '08', '09']
+    # files = ['01', '03', '05', '06']
+    files = ['01']
+    c = csv.writer(open('result.csv', 'a'))
+    c.writerow(['filename', 'start psnr', 'highest psnr', 'iteration num'])
+    psnr_all = []
+    # parameters = {
+    #     eta: [0.01]* 10,
+    #     lam: [1,2,3,4,5,6,7,8,9,10]
+    # }
+    for f in Path(directory).iterdir():
+        if not f.stem in files:
+            continue
+        img = imread(f)
+        # img = resize(img, (100, 100))
+        x_ = np.array(img, dtype=np.float32) / 255.0
+        # tmp = torch.from_numpy(x_).view(1, -1, *x_.shape)
+        # tmp = tmp.cuda() if cuda else tmp
+        np.random.seed(seed=0)  # for reproducibility
+        noise = np.random.normal(0, args.sigma/255.0, x_.shape)
+        y_ = (x_ + noise).astype(np.float32)
+        y = torch.from_numpy(y_).view(1, -1, *y_.shape)
+        y = y.cuda() if cuda else y
+        x = torch.tensor(y, requires_grad=True)
+        x = x.cuda() if cuda else x
+        # mse = nn.MSELoss(reduction='sum')
+        # l1 = nn.L1Loss(reduction='sum')
+        # w = 5
+        # plt.figure(figsize=(3*w, 3*(iter_num+w)))
+        # x_k, x_k-y, dD_k/dx_k, dL(x_k)/dx_k, x_k+1
+        # gs = gridspec.GridSpec(iter_num+w, w, wspace=0, hspace=0)
+        psnrs = []
+        for i in range(iter_num):
+            # if i%20==19:
+            #     lr /= 3
+            model.zero_grad()
+            model_out = model(x)
+            model_loss = model_out.pow(2).sum()
+            # model_loss = model_out.clamp(0).sum()
+            model_loss.backward()
+            # s(None, plt.subplot(2, 3, 1), n(x, x_), f'$x_{i}$')
+            # lam = 0.1
+            # s(None, plt.subplot(2, 3, 2), n((lam * x.grad), x_),
+            #   f'${lam}*\partial\Sigma D(x_{i})_{{ij}}^2/\partial x_{i}$')
+            # lam = 0.5
+            # s(None, plt.subplot(2, 3, 3), n((lam * x.grad), x_),
+            #   f'${lam}*\partial\Sigma D(x_{i})_{{ij}}^2/\partial x_{i}$')
+            # lam = 1
+            # s(None, plt.subplot(2, 3, 4), n((lam * x.grad), x_),
+            #   f'${lam}*\partial\Sigma D(x_{i})_{{ij}}^2/\partial x_{i}$')
+            # lam = 5
+            # s(None, plt.subplot(2, 3, 5), n((lam * x.grad), x_),
+            #   f'${lam}*\partial\Sigma D(x_{i})_{{ij}}^2/\partial x_{i}$')
+            # lam = 10
+            # s(None, plt.subplot(2, 3, 6), n((lam * x.grad), x_),
+            #   f'${lam}*\partial\Sigma D(x_{i})_{{ij}}^2/\partial x_{i}$')
+            # plt.show()
+            # exit(0)
+            # model_out.backward(torch.ones_like(model_out))
+            # for name, parameter in model.named_parameters():
+            #     t[name] = parameter.grad
+            with torch.no_grad():
+                # s(None, plt.subplot(gs[w+i, 0]), n(x, x_), f'$x_{i}$')
+                # s(None, plt.subplot(gs[w+i, 1]), n(x-y, x_), f'$x_{i}-y$')
+                g = (25/args.sigma)**2*(x-y)+lam*x.grad
+                # s(None, plt.subplot(gs[w+i, 2]), n(x.grad, x_),
+                #   f'$\partial\Sigma D(x_{i})/\partial x_{i}$')
+                # s(None, plt.subplot(gs[w+i, 3]), n(lr*g, x_),
+                #   f'$\eta\partial L(x_{i})/\partial x_{i}$')
+                x -= lr * g
+                x.grad.zero_()
+                t = n(x, x_)
+                psnr = compare_psnr(x_, t)
+                # ssim = compare_ssim(x_, t)
+                # s(None, plt.subplot(gs[w+i, 4]), n(x, x_),
+                #   f'$x_{i+1}$ psnr{psnr:2.2f} ssim{ssim:1.4f}')
+                print(f'{f} {i} lr={lr:.3f} psnr={psnr:2.2f}db')
+                psnrs.append(psnr)
+                if len(psnrs) > 5 and psnrs[-1] - psnrs[-5]<0.01:
+                    # del psnrs[-1]
+                    break
+                if len(psnrs) > 5 and psnrs[-2] > psnrs[-1]:
+                    del psnrs[-1]
+                    break
+        psnr_all.append(psnrs[-1])
+        # c.writerow(['filename','start psnr', 'highest psnr','iteration num'])
+        c.writerow([f, f'{compare_psnr(x_, y_):.2f}',
+                    f'{psnrs[-1]:.2f}', len(psnrs)])
+    # avg = np.mean(psnr_all)
+    # print(psnr_all, avg)
+    # c.writerow([f'eta={lr}', f'lambda={lam}', f'psnr avg={avg:.2f}'])
+    return
+    # top summary plot
+    # matplotlib.rcParams.update({'font.size': 20})
+    # ax = plt.subplot(gs[:6, :])
+    ax = plt.subplot()
+    ax.plot([i+1 for i in range(iter_num)], psnrs, label='$x_i$')
+    # ax.plot([i+1 for i in range(iter_num)],
+    #         [compare_psnr(x_, n(y-model(y), x_))]*iter_num, label='DnCNN')
+    dncnn = compare_psnr(x_, n(y-model(y), x_))
+    ax.set_xlabel('iteration')
+    ax.set_ylabel('psnr')
+    ax.xaxis.set_major_locator(MaxNLocator(integer=True))
+    # ax.set_xticks([i + 1 for i in range(iter_num)])
+    # ax.set_yticks(np.arange(20, 40, 0.2))
+    ax.set_title(
+        f'$\eta={lr:.2f},\lambda={lam}$, iteration num={iter_num}, dncnn psnr={dncnn:.2f}')
+    ax.legend()
+    # plt.tight_layout()
     plt.show()
 
-            # print(psnr)
-    # print(y_.cpu().numpy()-x_)
-    # show(x_)
-    # show(np.hstack((y, x_)))
-    # print('PSNR=%2.2fdB' % psnr)
 
+m()
 # if __name__ == '__main__':
 #     args = parse_args()
 #     model = torch.load(Path(args.model_dir, 'model.pth'), map_location='cpu')
