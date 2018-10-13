@@ -103,7 +103,7 @@ def pad(img, kernel,mode='replicate'):
     return F.pad(img, (p[-1], p[-1], p[-2], p[-2]), mode)
 
 def m():
-    torch.set_num_threads(2)
+    # torch.set_num_threads(2)
     args = parse_args()
     cuda = torch.cuda.is_available()
     model = torch.load(Path(args.model_dir, 'model.pth'),
@@ -111,6 +111,10 @@ def m():
                        # map_location='cuda:0')
     model = model.cuda() if cuda else model
     model.eval()
+    print(f'cuda: {cuda}')
+    print(f'{torch.cuda.current_device()}')
+    print(f'{torch.cuda.current_blas_handle()}')
+    print(f'{torch.cuda.device_count()}')
     lr = 10
     iter_num = 500
     lam = 1
@@ -128,13 +132,14 @@ def m():
     x = torch.tensor(y, requires_grad=True)
     psnrs = []
 
-    plt.figure(figsize=(10,30))
+    # plt.figure(figsize=(10,30))
     gs = gridspec.GridSpec(3, 2, wspace=0, hspace=0)
     pre = None
     t=4
     for i in range(iter_num):
         t*=0.9
-        lr = 6 + t
+        # lr = 6 + t
+        lr = 1
         model.zero_grad()
         model_out = model(x)
         model_loss = lam * model_out.norm(2)+0.5*(F.conv2d(pad(x,k), k)-y).norm(2)
@@ -153,8 +158,9 @@ def m():
     dncnn_out = n(y - model(y))
     dncnn_psnr = compare_psnr(x_, dncnn_out)
     start_psnr = compare_psnr(x_, n(y))
+    return
     s(None, plt.subplot(gs[0,0]), x_, f'x = ground truth')
-    s(None, plt.subplot(gs[0,1]), n(y), f'y = x+blue+noise, psnr={start_psnr:.2f}')
+    s(None, plt.subplot(gs[0,1]), n(y), f'y = x+blur+noise, psnr={start_psnr:.2f}')
     s(None, plt.subplot(gs[1,0]), dncnn_out, f'dncnn(y), psnr={dncnn_psnr:.2f}')
     s(None, plt.subplot(gs[1,1]), n(x), f'iteration result, psnr={psnrs[-1]:.2f}')
     ax = plt.subplot(gs[2:,:])
